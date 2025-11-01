@@ -1,11 +1,20 @@
 const express = require('express')
 const cookieparser = require('cookie-parser')
+const cors = require('cors')
 
-
+const authRoutes = require('./Routes/auth.Routes');
+const errorHandler = require('./middleWares/error.middleware')
 const app = express()
+app.use(
+    cors({
+        origin: process.env.CORS_ORIGIN || 'http://localhost:3001',
+        credentials: true,
+    })
+);
+app.use(express.json({limit: '16kb'}))
+app.use(cookieparser())
 
-app.use(express.json())
-app.use(cookieparser)
+app.use('/api/v1/auth', authRoutes)
 
-
+app.use(errorHandler);
 module.exports = app
