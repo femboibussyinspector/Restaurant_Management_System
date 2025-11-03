@@ -1,10 +1,8 @@
 const mongoose = require('mongoose');
 
-// This is the updated connection function
 async function connectdb() {
   try {
-    // We are adding an options object { dbName: ... }
-    // This forces Mongoose to use the database you specified
+
     const connectionInstance = await mongoose.connect(
       process.env.MONGO_URI,
       {
@@ -13,7 +11,7 @@ async function connectdb() {
     );
 
     console.log(
-      `connected to DataBase !! DB HOST: ${connectionInstance.connection.host}`
+      `\nconnected to DataBase !! DB HOST: ${connectionInstance.connection.host}`
     );
   } catch (err) {
     console.error('Error connecting to DataBase', err);
