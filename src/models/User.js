@@ -95,4 +95,3 @@ const User = mongoose.model('User', userSchema);
 
 // Export the model
 module.exports = User;
-

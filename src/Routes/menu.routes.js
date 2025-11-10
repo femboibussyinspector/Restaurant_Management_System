@@ -1,22 +1,27 @@
-const {Router} = require('express')
-const{createMenuItem, getAllMenuItems,updateMenuItem, getMenuItemById, deleteMenuItem,} = require('../controllers/menu.controller')
-const {protect, authorize} = require('../middleWares/auth.middleware');
+const { Router } = require('express');
+const {
+    createMenuItem,
+    getAllMenuItems,
+    getMenuItemById,
+    deleteMenuItem,
+    updateMenuItem // 1. Import the new controller
+} = require('../controllers/menu.controller');
+
+const { verifyAdminToken } = require('../middleWares/adminAuth.middleware.js');
 
 const router = Router();
 
-
+// --- Public Routes ---
 router.route('/').get(getAllMenuItems);
 router.route('/:id').get(getMenuItemById);
 
-//Protected Routes Only for Admins and employees//
-router
-.route('/').post(protect, authorize('admin','employee'), createMenuItem)
-router
-.route('/:id').post(protect, authorize('admin','employee'), createMenuItem)
+// --- Admin-Only Routes ---
 
+router.route('/').post(verifyAdminToken, createMenuItem);
 
+// 2. Add the new PUT route for updating
+router.route('/:id').put(verifyAdminToken, updateMenuItem);
 
-//Admin only access//
-router.route('/:id').delete(protect, authorize('admin',), deleteMenuItem)
+router.route('/:id').delete(verifyAdminToken, deleteMenuItem);
 
 module.exports = router;

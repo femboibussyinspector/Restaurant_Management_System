@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User')
-const ApiError = require('../utils/ApiError')
+const {ApiError} = require('../utils/ApiError')
 const asyncHandler = require('../utils/asyncHandler')
 
 /**Middleware t protect Routes */

@@ -1,89 +1,56 @@
-const User = require("../models/User");
-const ApiError = require("../utils/ApiError");
-const ApiResponse = require("../utils/ApiResponse");
-const asyncHandler = require("../utils/asyncHandler");
 
-const registerUser = asyncHandler(async (req, res) => {
-  const { name, email, password } = req.body;
+const ApiError = require('../utils/ApiError.js');
+const ApiResponse = require('../utils/ApiResponse.js');
+const asyncHandler = require('../utils/asyncHandler.js');
+const jwt = require('jsonwebtoken');
 
-  if (!name || !email || !password)
-    throw new ApiError(400, "All fields (name, email, password) are required");
+// --- HARDCODED ADMIN CREDENTIALS ---
+const ADMIN_EMAIL = "admin@restaurant.com";
+const ADMIN_PASSWORD = "zxcvbnms118"; 
+// -------------------------------------
 
-  if (password.length < 6)
-    throw new ApiError(400, "Password must be at least 6 characters");
+// This is the only function in the file
+const loginAdmin = asyncHandler(async (req, res) => {
+    const { email, password } = req.body;
 
-  const existingUser = await User.findOne({ email });
-  if (existingUser)
-    throw new ApiError(409, `User with email ${email} already exists`);
+    if (!email || !password) {
+        throw new ApiError(400, "Email and password are required.");
+    }
 
-  const user = await User.create({ name, email, password, role: "customer" });
-  const createdUser = await User.findById(user._id).select("-password -refreshToken");
+    // 1. Check if email and password match the hardcoded values
+    if (email !== ADMIN_EMAIL || password !== ADMIN_PASSWORD) {
+        throw new ApiError(401, "Invalid admin credentials.");
+    }
 
-  if (!createdUser)
-    throw new ApiError(500, "Something went wrong while registering the user");
-
-  return res
-    .status(201)
-    .json(new ApiResponse(201, { user: createdUser }, "User registered successfully"));
-});
-
-const loginUser = asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
-
-  if (!email || !password)
-    throw new ApiError(400, "Email and password are required");
-
-  const user = await User.findOne({ email }).select("+password");
-  if (!user)
-    throw new ApiError(401, "Invalid user credentials");
-
-  const isPasswordCorrect = await user.isPasswordCorrect(password);
-  if (!isPasswordCorrect)
-    throw new ApiError(401, "Invalid user credentials");
-
-  const accessToken = user.generateAccessToken();
-  const refreshToken = user.generateRefreshToken();
-
-  user.refreshToken = refreshToken;
-  await user.save({ validateBeforeSave: false });
-
-  const loggedInUser = await User.findById(user._id).select("-password -refreshToken");
-
-  const options = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-  };
-
-  return res
-    .status(200)
-    .cookie("accessToken", accessToken, options)
-    .cookie("refreshToken", refreshToken, options)
-    .json(
-      new ApiResponse(
-        200,
-        { user: loggedInUser, accessToken, refreshToken },
-        "User logged in successfully"
-      )
+    // 2. If they match, generate an Admin Token (this is different from the Table Token)
+    // We don't need to check a database
+    const adminToken = jwt.sign(
+        { 
+            role: "admin",
+            email: ADMIN_EMAIL
+        },
+        process.env.ACCESS_TOKEN_SECRET, // Make sure this is in your .env
+        { 
+            expiresIn: process.env.ACCESS_TOKEN_EXPIRY // Make sure this is in your .env
+        }
     );
+
+    const options = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+    };
+
+    return res
+        .status(200)
+        .cookie("adminAccessToken", adminToken, options) // Send a specific admin cookie
+        .json(new ApiResponse(
+            200, 
+            { token: adminToken, email: ADMIN_EMAIL }, 
+            "Admin logged in successfully."
+        ));
 });
 
-const logoutUser = asyncHandler(async (req, res) => {
-  await User.findByIdAndUpdate(
-    req.user._id,
-    { $unset: { refreshToken: 1 } },
-    { new: true }
-  );
-
-  const options = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-  };
-
-  return res
-    .status(200)
-    .clearCookie("accessToken", options)
-    .clearCookie("refreshToken", options)
-    .json(new ApiResponse(200, {}, "User logged out"));
-});
-
-module.exports = { registerUser, loginUser, logoutUser };
+// --- Export ONLY the login function ---
+module.exports = {
+    loginAdmin
+};

@@ -1,11 +1,11 @@
 import React from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 import LandingPage from "./Pages/LandingPage.jsx";
+import MenuPage from "./Pages/MenuPage.jsx";
 import RestaurantDashboard from "./Pages/Admin.jsx";
-import SignupPage from "./Pages/SignupPage.jsx";
-import LoginPage from "./Pages/LoginPage.jsx";
-import MenuPage from "./Pages/MenuPage.jsx"; // <-- Added this import
+import AdminLoginPage from "./Pages/AdminLoginPage.jsx"; 
+import TableLoginPage from "./Pages/TableLoginPage.jsx"; 
 
 import ProtectedRoute from "./Components/ProtectedRoutes.jsx";
 import AdminProtectedRoute from "./Components/AdminProtectedRoute.jsx";
@@ -16,20 +16,27 @@ function App() {
       <Routes>
         {/* --- PUBLIC ROUTES --- */}
         <Route path="/" element={<LandingPage />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/signup" element={<SignupPage />} />
-        <Route path="/menu" element={<MenuPage />} /> {/* <-- Added this route */}
 
-        {/* --- CUSTOMER (LOGGED-IN USERS) --- */}
-        <Route element={<ProtectedRoute />}>
-          <Route path="/customer" element={<h2>Customer Dashboard Coming Soon</h2>} />
-          {/* You could add a protected /cart route here */}
-        </Route>
-
-        {/* --- ADMIN ONLY ROUTES --- */}
+        {/* --- ADMIN WORLD --- */}
+        <Route path="/admin/login" element={<AdminLoginPage />} />
+        
         <Route element={<AdminProtectedRoute />}>
-          <Route path="/admin" element={<RestaurantDashboard />} />
+        
+          <Route path="/admin/*" element={<RestaurantDashboard />} />
+          
+          {/* If someone just goes to /admin, we automatically
+            redirect them to the /admin/dashboard page.
+          */}
+          <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
         </Route>
+
+        {/* --- TABLE / CUSTOMER WORLD --- */}
+        <Route path="/table/login" element={<TableLoginPage />} />
+
+        <Route element={<ProtectedRoute />}>
+          <Route path="/menu" element={<MenuPage />} />
+        </Route>
+
       </Routes>
     </BrowserRouter>
   );

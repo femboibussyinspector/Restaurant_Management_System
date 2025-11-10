@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from "react";
+import { socket } from '../socket';
+import api from '../axios'
 import {
   BarChart,
   Bar,
@@ -33,7 +35,7 @@ import {
   ThumbsDown,
   Minus,
 } from "lucide-react";
-
+import { Routes, Route, Link, useLocation } from "react-router-dom";
 // Mock Data Generator
 const generateMockData = () => {
   const menuItems = [
@@ -207,18 +209,184 @@ const generateMockData = () => {
 
 const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444"];
 
-const RestaurantDashboard = () => {
-  const [activeTab, setActiveTab] = useState("dashboard");
+const RestaurantDashboard = () =>{
   const [data, setData] = useState(generateMockData());
+  const [menuItems, setMenuItems] = useState([]);
   const [selectedTable, setSelectedTable] = useState(null);
   const [userRole, setUserRole] = useState("admin");
-
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
+  const [tables, setTables] = useState([]);
+  const [liveOrders, setLiveOrders] = useState([]);
+  const location = useLocation();
   useEffect(() => {
     const interval = setInterval(() => {
       setData(generateMockData());
     }, 30000);
     return () => clearInterval(interval);
   }, []);
+  useEffect(() => {
+    const fetchMenu = async () => {
+      try {
+        const response = await api.get('/menu');
+        if (response.data && Array.isArray(response.data.data)) {
+          setMenuItems(response.data.data);
+        } else {
+          console.error("API response is not in the expected format:", response.data);
+          setMenuItems([]);
+        }
+      } catch (error) {
+        console.error("Failed to fetch menu:", error);
+        setMenuItems([]);
+      }
+    };
+
+    fetchMenu();
+
+    socket.connect();
+
+    function onMenuItemAdded(newItem) {
+      setMenuItems((prev) => [...prev, newItem]);
+    }
+
+    function onMenuItemUpdated(updatedItem) {
+      setMenuItems((prev) => 
+        prev.map((item) => item._id === updatedItem._id ? updatedItem : item)
+      );
+    }
+
+    function onMenuItemDeleted(data) {
+      setMenuItems((prev) => prev.filter((item) => item._id !== data.id));
+    }
+
+    socket.on('menuItemAdded', onMenuItemAdded);
+    socket.on('menuItemUpdated', onMenuItemUpdated);
+    socket.on('menuItemDeleted', onMenuItemDeleted);
+
+    return () => {
+      socket.disconnect();
+      socket.off('menuItemAdded', onMenuItemAdded);
+      socket.off('menuItemUpdated', onMenuItemUpdated);
+      socket.off('menuItemDeleted', onMenuItemDeleted);
+    };
+  }, []);
+  
+  useEffect(() => {
+    const fetchTables = async () => {
+      try {
+        const response = await api.get('/tables');
+        setTables(response.data.data);
+      } catch (error) {
+        console.error("Failed to fetch tables:", error);
+      }
+    };
+    fetchTables();
+  }, []);
+// --- ADD THIS NEW BLOCK ---
+useEffect(() => {
+  // 1. Connect and join the admin room
+  socket.connect();
+  socket.emit('joinAdminRoom'); // You need to add this room logic to server.js later
+
+  // 2. Listener for new orders
+  function onNewOrderPlaced(newOrder) {
+    // Add the new order to the top of the list
+    setLiveOrders((prevOrders) => [newOrder, ...prevOrders]);
+  }
+  
+  // 3. Listener for status updates (Mark Ready/Served buttons)
+  function onOrderStatusUpdated(updatedOrder) {
+    setLiveOrders((prevOrders) => 
+      prevOrders.map((order) =>
+        order._id === updatedOrder._id ? updatedOrder : order
+      )
+    );
+  }
+  
+  // 4. Attach listeners
+  socket.on('newOrderPlaced', onNewOrderPlaced);
+  socket.on('orderStatusUpdated', onOrderStatusUpdated);
+
+  // 5. Cleanup when the component unmounts
+  return () => {
+    socket.off('newOrderPlaced', onNewOrderPlaced);
+    socket.off('orderStatusUpdated', onOrderStatusUpdated);
+    socket.disconnect(); // This may disconnect the entire app, consider keeping it connected
+  };
+}, []);
+
+  const handleDeleteItem = async (itemId) => {
+    if (!window.confirm("Are you sure you want to delete this item?")) {
+      return;
+    }
+
+    try {
+      await api.delete(`/menu/${itemId}`);
+      setMenuItems((prevItems) =>
+        prevItems.filter((item) => item._id !== itemId)
+      );
+    } catch (error) {
+      console.error("Failed to delete item:", error);
+      alert("Failed to delete item. See console for details.");
+    }
+  };
+
+  const handleAddItem = async (newItemData) => {
+    try {
+      const response = await api.post('/menu', newItemData);
+      
+      // ... success code ...
+
+    } catch (error) {
+      console.error("Failed to add item:", error);
+      
+      const errorMessage = error.response?.data?.message || // Get specific error message
+                           error.response?.data?.errors?.message || // Check deeper for validation errors
+                           "An unknown error occurred. Check console.";
+
+      alert("Failed to add item: " + errorMessage); // <-- SHOW THE ERROR TO THE USER
+    }
+  };
+  
+  const handleOpenEditModal = (item) => {
+    setEditingItem(item);
+    setIsModalOpen(true);
+  }
+
+  const handleUpdateItem = async (updatedItemData) => {
+    if (!editingItem) return;
+
+    try {
+      const response = await api.put(`/menu/${editingItem._id}`, updatedItemData);
+      
+      setMenuItems((prevItems) =>
+        prevItems.map((item) =>
+          item._id === editingItem._id ? response.data.data : item
+        )
+      );
+      
+      setIsModalOpen(false);
+      setEditingItem(null);
+    } catch (error) {
+      console.error("Failed to update item:", error);
+      alert("Failed to update item. See console for details.");
+    }
+  };
+
+  const handleUpdateTableStatus = async (tableId, newStatus) => {
+    try {
+      const response = await api.patch(`/tables/${tableId}/status`, { status: newStatus });
+      
+      setTables((prevTables) =>
+        prevTables.map((table) =>
+          table._id === tableId ? response.data.data : table
+        )
+      );
+    } catch (error) {
+      console.error("Failed to update table status:", error);
+      alert("Failed to update status. See console for details.");
+    }
+  };
 
   // Dashboard View
   const DashboardView = () => (
@@ -335,68 +503,75 @@ const RestaurantDashboard = () => {
     </div>
   );
 
-  // Smart Menu View
-  const MenuView = () => (
-    <div className="space-y-6 h-screen w-[90vw]">
-      <div className="bg-white rounded-xl shadow-lg p-6">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-2xl font-bold flex items-center text-orange-500 gap-2">
-            <Utensils className="w-7 h-7 text-orange-500" />
-            Smart Menu Management
-          </h3>
-          <button className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition">
-            + Add Item
-          </button>
-        </div>
+ // Smart Menu View
+ const MenuView = () => (
+  <div className="space-y-6 h-screen w-[90vw]">
+    <div className="bg-white rounded-xl shadow-lg p-6">
+      <div className="flex justify-between items-center mb-6">
+        <h3 className="text-2xl font-bold flex items-center text-orange-500 gap-2">
+          <Utensils className="w-7 h-7 text-orange-500" />
+          Smart Menu Management
+        </h3>
+        <button 
+          onClick={() => setIsModalOpen(true)}
+          className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition"
+        >
+          + Add Item
+        </button>
+      </div>
 
-        <div className="mb-4 p-4 bg-blue-50 border-l-4 border-blue-500 rounded">
-          <p className="text-sm font-semibold text-blue-800">
-            🤖 AI Recommendation:
-          </p>
-          <p className="text-sm text-blue-700">
-            Consider adding "Chicken Tikka Masala" - trending 25% this week
-            based on customer preferences
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {data.menuItems.map((item) => (
-            <div
-              key={item.id}
-              className="border border-gray-200 rounded-xl p-4 hover:shadow-lg transition"
-            >
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        {menuItems.map((item) => (
+          <div
+            key={item._id}
+            className="border border-gray-200 rounded-xl p-4 flex flex-col justify-between hover:shadow-lg transition"
+          >
+            <div>
               <div className="flex justify-between items-start mb-3">
-                <div className="text-4xl">{item.image}</div>
+                <div className="text-4xl">{item.image || '🍛'}</div>
                 <span
                   className={`px-2 py-1 rounded-full text-xs ${
-                    item.available
+                    item.isAvailable 
                       ? "bg-green-100 text-green-700"
                       : "bg-red-100 text-red-700"
                   }`}
                 >
-                  {item.available ? "Available" : "Unavailable"}
+                  {item.isAvailable ? "Available" : "Unavailable"}
                 </span>
               </div>
               <h4 className="font-bold text-black text-xl mb-1">{item.name}</h4>
-              <p className="text-sm text-gray-500 mb-2">{item.category}</p>
+              <p className="text-sm text-gray-500 mb-2">{item.description}</p>
               <div className="flex justify-between items-center mb-2">
                 <span className="text-xl font-bold text-blue-600">
                   ₹{item.price}
                 </span>
                 <div className="flex items-center gap-1">
                   <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                  <span className="text-sm font-semibold">{item.rating}</span>
+                  <span className="text-sm font-semibold">{item.rating || 0}</span>
                 </div>
               </div>
               <div className="text-xs text-gray-600">
-                📊 {item.orders} orders this week
+                📊 {item.orders || 0} orders
               </div>
             </div>
-          ))}
-        </div>
+            
+            <div className="flex gap-2 mt-4">
+            <button onClick={() => handleOpenEditModal(item)}className="flex-1 px-3 py-2 bg-blue-500 text-white text-sm rounded hover:bg-blue-600 transition">
+      Edit
+              </button>
+              <button
+                onClick={() => handleDeleteItem(item._id)}
+                className="flex-1 px-3 py-2 bg-red-500 text-white text-sm rounded hover:bg-red-600 transition"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
-  );
+  </div>
+);
 
   // Table Heat Map View
   const TableView = () => (
@@ -404,10 +579,10 @@ const RestaurantDashboard = () => {
       <div className="bg-white rounded-xl shadow-lg p-6">
         <h3 className="text-2xl font-bold mb-6 flex items-center text-purple-500 gap-2">
           <Activity className="w-7 h-7 text-purple-500" />
-          Dynamic Table Allocation - Live Heat Map
+          Live Table Management
         </h3>
 
-        <div className="mb-6 flex gap-4 text-black text-sm">
+        <div className="mb-6 flex flex-wrap gap-4 text-black text-sm">
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 bg-green-400 rounded"></div>
             <span>Available</span>
@@ -426,74 +601,76 @@ const RestaurantDashboard = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-4 gap-4">
-          {data.tables.map((table) => {
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          {tables.map((table) => {
             const statusColors = {
-              available: "bg-green-400 hover:bg-green-500",
-              occupied: "bg-red-400 hover:bg-red-500",
-              reserved: "bg-yellow-400 hover:bg-yellow-500",
-              cleaning: "bg-gray-400 hover:bg-gray-500",
+              available: "bg-green-400",
+              occupied: "bg-red-400",
+              reserved: "bg-yellow-400",
+              cleaning: "bg-gray-400",
             };
 
             return (
               <div
-                key={table.id}
-                onClick={() => setSelectedTable(table)}
+                key={table._id}
                 className={`${
                   statusColors[table.status]
-                } rounded-xl p-4 cursor-pointer transition transform hover:scale-105 text-white shadow-lg`}
+                } rounded-xl p-4 text-white shadow-lg relative`}
               >
-                <div className="font-bold text-lg mb-1">Table {table.id}</div>
-                <div className="text-sm opacity-90">
+                {/* --- THIS IS THE NEW BADGE --- */}
+                {table.isInSession && (
+                  <span className="absolute -top-2 -right-2 flex h-5 w-5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-5 w-5 bg-red-600 justify-center items-center text-xs font-semibold">
+                      LIVE
+                    </span>
+                  </span>
+                )}
+                {/* --------------------------- */}
+
+                <div className="font-bold text-lg mb-1">Table {table.tableNumber}</div>
+                <div className="text-sm opacity-90 mb-3">
                   Capacity: {table.capacity}
                 </div>
-                <div className="text-xs mt-2 opacity-75">
-                  Heat: {Math.round(table.occupancyScore)}%
+                
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-white/90">Change Status:</label>
+                  <select
+                    value={table.status}
+                    onChange={(e) => handleUpdateTableStatus(table._id, e.target.value)}
+                    className="w-full rounded-md border-0 p-1.5 text-gray-900"
+                  >
+                    <option value="available">Available</option>
+                    <option value="occupied">Occupied</option>
+                    <option value="reserved">Reserved</option>
+                    <option value="cleaning">Cleaning</option>
+                  </select>
                 </div>
-                {table.currentOrder > 0 && (
-                  <div className="text-xs mt-1 font-semibold">
-                    ₹{table.currentOrder}
-                  </div>
-                )}
               </div>
             );
           })}
         </div>
-
-        {selectedTable && (
-          <div className="mt-6 p-4 bg-gray-50 rounded-xl">
-            <h4 className="font-bold mb-2">Table {selectedTable.id} Details</h4>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                Status:{" "}
-                <span className="font-semibold">{selectedTable.status}</span>
-              </div>
-              <div>
-                Capacity:{" "}
-                <span className="font-semibold">
-                  {selectedTable.capacity} persons
-                </span>
-              </div>
-              <div>
-                Heat Score:{" "}
-                <span className="font-semibold">
-                  {Math.round(selectedTable.occupancyScore)}%
-                </span>
-              </div>
-              <div>
-                Current Bill:{" "}
-                <span className="font-semibold">
-                  ₹{selectedTable.currentOrder}
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
-
   // Kitchen Dashboard View
+  const handleUpdateOrderStatus = async (orderId, newStatus) => {
+    try {
+      const response = await api.patch(`/order/${orderId}/status`, { status: newStatus });
+      const updatedOrder = response.data.data;
+      
+      // Update state immediately without waiting for socket event (for fast UI feedback)
+      setLiveOrders((prevOrders) => 
+        prevOrders.map((order) =>
+          order._id === orderId ? updatedOrder : order
+        )
+      );
+    } catch (error) {
+      console.error("Failed to update order status:", error);
+      alert(error.response?.data?.message || "Failed to update order status.");
+    }
+  };
+
   const KitchenView = () => (
     <div className="space-y-6">
       <div className="bg-white rounded-xl shadow-lg p-6">
@@ -503,8 +680,12 @@ const RestaurantDashboard = () => {
         </h3>
 
         <div className="space-y-4">
-          {data.orders.map((order) => {
+          {liveOrders.length === 0 && (
+            <p className="text-gray-500 text-center py-10">No active orders are currently pending.</p>
+          )}
+          {liveOrders.map((order) => {
             const statusColors = {
+              pending: "border-red-400 bg-red-50",
               preparing: "border-yellow-400 bg-yellow-50",
               ready: "border-green-400 bg-green-50",
               served: "border-gray-400 bg-gray-50",
@@ -512,46 +693,63 @@ const RestaurantDashboard = () => {
 
             return (
               <div
-                key={order.id}
+                key={order._id}
                 className={`border-l-4 ${
                   statusColors[order.status]
-                } rounded-lg p-4`}
+                } rounded-lg p-4 transition duration-300`}
               >
                 <div className="flex justify-between items-start mb-2">
                   <div>
-                    <div className="font-bold text-lg">{order.id}</div>
+                    <div className="font-bold text-lg text-gray-800">{order.tableId}</div>
                     <div className="text-sm text-gray-600">
-                      Table {order.table}
+                      Order ID: {order._id.substring(0, 8)}
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-sm font-semibold text-gray-700">
-                      {order.time}
-                    </div>
-                    <div className="text-xs text-gray-500 capitalize">
+                    <div className="text-sm font-semibold text-gray-700 capitalize">
                       {order.status}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {new Date(order.createdAt).toLocaleTimeString()}
                     </div>
                   </div>
                 </div>
-                <div className="space-y-1 mb-3">
+                
+                <div className="space-y-1 mb-3 border-b border-gray-200 pb-2">
                   {order.items.map((item, idx) => (
-                    <div key={idx} className="text-sm">
-                      • {item}
+                    <div key={idx} className="text-sm text-gray-700 flex justify-between">
+                      <span>{item.name}</span>
+                      <span className="font-semibold">x{item.quantity}</span>
                     </div>
                   ))}
                 </div>
+                
                 <div className="flex justify-between items-center">
                   <span className="font-bold text-blue-600">
-                    ₹{order.total}
+                    Total: ₹{order.totalAmount.toFixed(2)}
                   </span>
                   <div className="flex gap-2">
+                    {order.status === "pending" && (
+                      <button 
+                        onClick={() => handleUpdateOrderStatus(order._id, "preparing")}
+                        className="px-3 py-1 bg-yellow-500 text-white text-sm rounded hover:bg-yellow-600 transition"
+                      >
+                        Start Prep
+                      </button>
+                    )}
                     {order.status === "preparing" && (
-                      <button className="px-3 py-1 bg-green-500 text-white text-sm rounded hover:bg-green-600">
+                      <button 
+                        onClick={() => handleUpdateOrderStatus(order._id, "ready")}
+                        className="px-3 py-1 bg-green-500 text-white text-sm rounded hover:bg-green-600 transition"
+                      >
                         Mark Ready
                       </button>
                     )}
                     {order.status === "ready" && (
-                      <button className="px-3 py-1 bg-blue-500 text-white text-sm rounded hover:bg-blue-600">
+                      <button 
+                        onClick={() => handleUpdateOrderStatus(order._id, "served")}
+                        className="px-3 py-1 bg-blue-500 text-white text-sm rounded hover:bg-blue-600 transition"
+                      >
                         Mark Served
                       </button>
                     )}
@@ -564,7 +762,6 @@ const RestaurantDashboard = () => {
       </div>
     </div>
   );
-
   // Feedback & Sentiment Analysis View
   const FeedbackView = () => (
     <div className="space-y-6">
@@ -743,52 +940,62 @@ const RestaurantDashboard = () => {
             <NavTab
               icon={<Activity />}
               label="Dashboard"
-              active={activeTab === "dashboard"}
-              onClick={() => setActiveTab("dashboard")}
+              to="/admin/dashboard"
+              active={location.pathname === "/admin/dashboard"}
             />
             <NavTab
               icon={<Menu />}
               label="Smart Menu"
-              active={activeTab === "menu"}
-              onClick={() => setActiveTab("menu")}
+              to="/admin/menu"
+              active={location.pathname === "/admin/menu"}
             />
             <NavTab
               icon={<Users />}
               label="Tables"
-              active={activeTab === "tables"}
-              onClick={() => setActiveTab("tables")}
+              to="/admin/tables"
+              active={location.pathname === "/admin/tables"}
             />
             <NavTab
               icon={<Utensils />}
               label="Kitchen"
-              active={activeTab === "kitchen"}
-              onClick={() => setActiveTab("kitchen")}
+              to="/admin/kitchen"
+              active={location.pathname === "/admin/kitchen"}
             />
             <NavTab
               icon={<MessageSquare />}
               label="Feedback"
-              active={activeTab === "feedback"}
-              onClick={() => setActiveTab("feedback")}
+              to="/admin/feedback"
+              active={location.pathname === "/admin/feedback"}
             />
             <NavTab
               icon={<QrCode />}
               label="QR Ordering"
-              active={activeTab === "qr"}
-              onClick={() => setActiveTab("qr")}
+              to="/admin/qr"
+              active={location.pathname === "/admin/qr"}
             />
           </div>
         </div>
       </nav>
-
       {/* Main Content */}
       <main className="px-6 py-8 mx-5">
-        {activeTab === "dashboard" && <DashboardView />}
-        {activeTab === "menu" && <MenuView />}
-        {activeTab === "tables" && <TableView />}
-        {activeTab === "kitchen" && <KitchenView />}
-        {activeTab === "feedback" && <FeedbackView />}
-        {activeTab === "qr" && <QRView />}
+        <Routes>
+          <Route path="dashboard" element={<DashboardView />} />
+          <Route path="menu" element={<MenuView />} />
+          <Route path="tables" element={<TableView />} />
+          <Route path="kitchen" element={<KitchenView />} />
+          <Route path="feedback" element={<FeedbackView />} />
+          <Route path="qr" element={<QRView />} />
+        </Routes>
       </main>
+      <AddItemModal 
+        isOpen={isModalOpen} 
+        onClose={() => {
+          setIsModalOpen(false);
+          setEditingItem(null);
+        }} 
+        onSave={editingItem ? handleUpdateItem : handleAddItem}
+        editingItem={editingItem}
+      />
 
       {/* Footer */}
       <footer className="bg-gray-800 text-white mt-12">
@@ -828,9 +1035,9 @@ const InsightCard = ({ title, value, description }) => (
   </div>
 );
 
-const NavTab = ({ icon, label, active, onClick }) => (
-  <button
-    onClick={onClick}
+const NavTab = ({ icon, label, to, active }) => (
+  <Link
+    to={to}
     className={`flex items-center gap-2 px-4 py-3 font-medium transition border-b-2 whitespace-nowrap ${
       active
         ? "border-blue-500 text-blue-600 bg-blue-50"
@@ -839,7 +1046,7 @@ const NavTab = ({ icon, label, active, onClick }) => (
   >
     <span className="w-5 h-5">{icon}</span>
     <span>{label}</span>
-  </button>
+  </Link>
 );
 
 const Step = ({ number, text }) => (
@@ -851,4 +1058,159 @@ const Step = ({ number, text }) => (
   </div>
 );
 
+
+const AddItemModal = ({ isOpen, onClose, onSave, editingItem }) => {
+  const [formData, setFormData] = useState({
+    name: "",
+    description: "",
+    price: "",
+    category: "Main Course",
+    isAvailable: true,
+    SpiceLevel: "1",
+  });
+
+  useEffect(() => {
+    if (editingItem) {
+      setFormData({
+        name: editingItem.name,
+        description: editingItem.description,
+        price: editingItem.price,
+        category: editingItem.category,
+        isAvailable: editingItem.isAvailable,
+        SpiceLevel: editingItem.SpiceLevel || "1",
+      });
+    } else {
+      setFormData({
+        name: "",
+        description: "",
+        price: "",
+        category: "Main Course",
+        isAvailable: true,
+        SpiceLevel: "1",
+      });
+    }
+  }, [editingItem, isOpen]);
+
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setFormData((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onSave(formData);
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 overflow-y-auto p-4">
+      <div className="bg-white rounded-xl shadow-lg p-6 w-full max-w-md mt-20">
+        <h3 className="text-2xl font-bold mb-6 text-gray-800">
+          {editingItem ? "Edit Menu Item" : "Add New Menu Item"}
+        </h3>
+        <form onSubmit={handleSubmit}>
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Item Name</label>
+            <input
+              type="text"
+              name="name"
+              value={formData.name}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-gray-300 bg-gray-50 p-3 text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+            <textarea
+              name="description"
+              value={formData.description}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-gray-300 bg-gray-50 p-3 text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Price (₹)</label>
+            <input
+              type="number"
+              name="price"
+              value={formData.price}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-gray-300 bg-gray-50 p-3 text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
+            <select
+              name="category"
+              value={formData.category}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-gray-300 bg-gray-50 p-3 text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+            >
+              <option>Main Course</option>
+              <option>Starters</option>
+              <option>Dessert</option>
+              <option>Drinks</option>
+              <option>Sides</option>
+              <option>Chefs Kiss</option>
+            </select>
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Spice Level</label>
+            <select
+              name="SpiceLevel"
+              value={formData.SpiceLevel}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-gray-300 bg-gray-50 p-3 text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="0">0 (No Spice)</option>
+              <option value="1">1 (Mild)</option>
+              <option value="2">2 (Medium)</option>
+              <option value="3">3 (Spicy)</option>
+            </select>
+          </div>
+
+          <div className="mb-6">
+            <label className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                name="isAvailable"
+                checked={formData.isAvailable}
+                onChange={handleChange}
+                className="w-5 h-5"
+              />
+              <span className="text-sm font-medium text-gray-700">Item is Available</span>
+            </label>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition"
+            >
+              {editingItem ? "Save Changes" : "Add Item"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
 export default RestaurantDashboard;

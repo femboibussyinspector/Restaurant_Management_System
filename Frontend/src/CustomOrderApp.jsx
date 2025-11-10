@@ -38,9 +38,6 @@ const CustomerOrderApp = () => {
   const [tableNumber, setTableNumber] = useState("5");
   const [orderHistory, setOrderHistory] = useState([]);
 
-  // --- (Our Change) ---
-  // 1. Delete the hardcoded menuItems array.
-  // 2. Add new state for our live data, loading, and errors.
   const [menuItems, setMenuItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
